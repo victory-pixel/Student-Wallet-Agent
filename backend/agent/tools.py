@@ -7,6 +7,7 @@ from backend.models import (
     AgentDecision,
     AllocationMode,
     Category,
+    FixedCost,
     IncomeAllocation,
     IncomeEntry,
     IncomePattern,
@@ -375,6 +376,79 @@ def log_income(
             "amount": amount,
             "allocation_mode": mode.value,
             "allocations": allocations_made,
+        }
+    finally:
+        session.close()
+
+
+#Fixed Cost Reminders
+@tool
+def check_fixed_cost_reminders(semester_id: int) -> dict:
+    session = SessionLocal()
+    try:
+        semester = session.get(Semester, semester_id)
+        if semester is None:
+            return {"success": False, "error": "Semester not found."}
+
+        fixed_costs = (
+            session.query(FixedCost)
+            .filter_by(semester_id=semester_id, is_paid=False)
+            .all()
+        )
+
+        today = date.today()
+        reminders_fired = []
+
+        for cost in fixed_costs:
+            days_until_due = (cost.due_date - today).days
+
+            if days_until_due < 0:
+                continue  # overdue and unpaid — handled separately, not a reminder case
+
+            if days_until_due == 7 and not cost.reminded_week_before:
+                cost.reminded_week_before = True
+                reminders_fired.append({
+                    "fixed_cost": cost.name,
+                    "amount": cost.amount,
+                    "due_date": cost.due_date.isoformat(),
+                    "milestone": "one_week_before",
+                    "message": f"'{cost.name}' ({cost.amount:.0f}) is due in 1 week, on {cost.due_date.isoformat()}.",
+                })
+
+            elif days_until_due == 1 and not cost.reminded_day_before:
+                cost.reminded_day_before = True
+                reminders_fired.append({
+                    "fixed_cost": cost.name,
+                    "amount": cost.amount,
+                    "due_date": cost.due_date.isoformat(),
+                    "milestone": "one_day_before",
+                    "message": f"'{cost.name}' ({cost.amount:.0f}) is due tomorrow.",
+                })
+
+            elif days_until_due == 0 and not cost.reminded_day_of:
+                cost.reminded_day_of = True
+                reminders_fired.append({
+                    "fixed_cost": cost.name,
+                    "amount": cost.amount,
+                    "due_date": cost.due_date.isoformat(),
+                    "milestone": "day_of",
+                    "message": f"'{cost.name}' ({cost.amount:.0f}) is due today.",
+                })
+
+        for fired in reminders_fired:
+            decision = AgentDecision(
+                semester_id=semester_id,
+                kind="fixed_cost_reminder",
+                message=fired["message"],
+            )
+            session.add(decision)
+
+        session.commit()
+
+        return {
+            "success": True,
+            "reminders_fired": reminders_fired,
+            "count": len(reminders_fired),
         }
     finally:
         session.close()
