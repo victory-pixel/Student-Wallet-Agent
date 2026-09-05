@@ -5,8 +5,10 @@ from strands import tool
 from backend.database import SessionLocal
 from backend.models import (
     AgentDecision,
+    AllocationMode,
     Category,
     IncomeAllocation,
+    IncomeEntry,
     IncomePattern,
     Semester,
     Transaction,
@@ -262,6 +264,117 @@ def suggest_reallocation(category_id: int) -> dict:
             "suggested_amount": suggested_amount,
             "message": message,
             "reallocation_mode": semester.reallocation_mode.value,
+        }
+    finally:
+        session.close()
+
+
+#logging transactions
+@tool
+def log_income(
+    semester_id: int,
+    amount: float,
+    source: str | None = None,
+    allocation_mode: str = "auto_split",
+    target_category_ids: list[int] | None = None,
+    target_amounts: list[float] | None = None,
+) -> dict:
+    session = SessionLocal()
+    try:
+        semester = session.get(Semester, semester_id)
+        if semester is None:
+            return {"success": False, "error": "Semester not found."}
+
+        mode = (
+            AllocationMode.TARGETED
+            if allocation_mode == "targeted"
+            else AllocationMode.AUTO_SPLIT
+        )
+
+        income = IncomeEntry(
+            semester_id=semester_id,
+            amount=amount,
+            source=source,
+            allocation_mode=mode,
+        )
+        session.add(income)
+        session.commit()
+
+        allocations_made = []
+
+        if mode == AllocationMode.TARGETED:
+            if not target_category_ids or not target_amounts:
+                return {
+                    "success": False,
+                    "error": "targeted_allocation_missing",
+                    "message": (
+                        "Targeted allocation needs target_category_ids and "
+                        "target_amounts. Ask the user which category(ies) "
+                        "this income is for and how much goes to each."
+                    ),
+                }
+            if len(target_category_ids) != len(target_amounts):
+                return {
+                    "success": False,
+                    "error": "mismatched_targets",
+                    "message": "target_category_ids and target_amounts must be the same length.",
+                }
+            if sum(target_amounts) > amount:
+                return {
+                    "success": False,
+                    "error": "over_allocated",
+                    "message": (
+                        f"Targeted amounts ({sum(target_amounts)}) exceed the "
+                        f"income amount ({amount}). Ask the user to adjust."
+                    ),
+                }
+
+            for cat_id, amt in zip(target_category_ids, target_amounts):
+                category = session.get(Category, cat_id)
+                if category is None:
+                    continue
+                allocation = IncomeAllocation(
+                    income_entry_id=income.id,
+                    category_id=cat_id,
+                    amount=amt,
+                )
+                session.add(allocation)
+                allocations_made.append({"category": category.name, "amount": amt})
+
+        else:  # AUTO_SPLIT
+            categories = session.query(Category).filter_by(semester_id=semester_id).all()
+            total_percentage = sum(c.target_percentage for c in categories)
+
+            if total_percentage <= 0:
+                return {
+                    "success": False,
+                    "error": "no_percentages_set",
+                    "message": (
+                        "No category percentages have been set for this semester. "
+                        "Ask the user to set target percentages before auto-splitting income."
+                    ),
+                }
+
+            for category in categories:
+                if category.target_percentage <= 0:
+                    continue
+                share = (category.target_percentage / total_percentage) * amount
+                allocation = IncomeAllocation(
+                    income_entry_id=income.id,
+                    category_id=category.id,
+                    amount=round(share, 2),
+                )
+                session.add(allocation)
+                allocations_made.append({"category": category.name, "amount": round(share, 2)})
+
+        session.commit()
+
+        return {
+            "success": True,
+            "income_entry_id": income.id,
+            "amount": amount,
+            "allocation_mode": mode.value,
+            "allocations": allocations_made,
         }
     finally:
         session.close()
