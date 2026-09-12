@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Student Wallet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f2fa;
+    --card: #ffffff;
+    --accent: #7c5cbf;
+    --accent-dark: #5f3fa3;
+    --accent-soft: #eee8fb;
+    --ink: #221c35;
+    --muted: #736c8a;
+    --border: #e7e3f3;
+    --good: #4a7a5c;
+    --warn: #b8493f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+  }
+  .app {
+    width: 100%;
+    max-width: 440px;
+    padding: 28px 20px 100px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+  }
+  header .greet {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 2px;
+  }
+  header h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 28px;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .edit-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--accent-dark);
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .edit-btn:hover { background: var(--accent-soft); }
+ 
+  .balance-card {
+    background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+    color: white;
+    border-radius: 20px;
+    padding: 24px 22px;
+    margin-bottom: 14px;
+  }
+  .balance-card .label {
+    font-size: 14px;
+    opacity: 0.85;
+    margin: 0 0 6px;
+  }
+  .balance-card .amount {
+    font-family: 'Fraunces', serif;
+    font-size: 40px;
+    font-weight: 600;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .balance-card .sub {
+    font-size: 14px;
+    opacity: 0.85;
+    margin: 6px 0 0;
+  }
+ 
+  .stat-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+    position: relative;
+  }
+  .stat-card:hover { border-color: var(--accent); }
+  .stat-card:active { transform: scale(0.98); }
+  .stat-card .stat-label {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0 0 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .stat-card .stat-amount {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0;
+  }
+  .plus-badge {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+  }
+ 
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 16px;
+    margin: 0 0 4px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card .sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  .progress-track {
+    height: 6px;
+    background: var(--accent-soft);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+  }
+  .card p.line {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0;
+  }
+  .card p.line strong { color: var(--ink); }
+ 
+  .insight-card p {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0 0 6px;
+    line-height: 1.5;
+  }
+  .insight-card p:last-child { margin-bottom: 0; }
+  .insight-card strong { color: var(--ink); }
+  .over { color: var(--warn); font-weight: 700; }
+  .under { color: var(--good); font-weight: 700; }
+ 
+  .load-note {
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    margin: -6px 0 14px;
+  }
+ 
+  /* Modal */
+  .overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(34, 28, 53, 0.45);
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 20;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    background: var(--card);
+    width: 100%;
+    max-width: 440px;
+    border-radius: 20px 20px 0 0;
+    padding: 22px 20px 28px;
+    animation: slideUp 0.2s ease-out;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(16px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .modal h3 {
+    margin: 0 0 16px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+  .field { margin-bottom: 14px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .field input, .field select {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    font-size: 15px;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  .field input:focus, .field select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .btn {
+    flex: 1;
+    padding: 13px;
+    border-radius: 12px;
+    border: none;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent-dark); }
+  .btn-secondary { background: var(--accent-soft); color: var(--accent-dark); }
+  .btn-secondary:hover { background: var(--border); }
+  .status-msg {
+    font-size: 13px;
+    margin-top: 10px;
+    min-height: 18px;
+  }
+  .status-msg.success { color: var(--good); }
+  .status-msg.error { color: var(--warn); }
+ 
+  /* Registration screen */
+  .auth-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+    padding: 20px;
+  }
+  .auth-screen.hidden { display: none; }
+  .auth-card {
+    background: var(--card);
+    border-radius: 20px;
+    padding: 32px 26px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 8px 30px rgba(34,28,53,0.08);
+  }
+  .auth-card h1 {
+    font-family: 'Fraunces', serif;
+    font-size: 24px;
+    margin: 0 0 6px;
+  }
+  .auth-card p.sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 24px;
+  }
+  .auth-note {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 14px;
+    line-height: 1.5;
+  }
+ 
+  /* Floating chat bubble */
+  .chat-bubble-btn {
+    position: fixed;
+    bottom: 22px;
+    right: max(22px, calc(50% - 200px));
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    box-shadow: 0 6px 18px rgba(95, 63, 163, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 25;
+    transition: transform 0.15s;
+  }
+  .chat-bubble-btn:hover { transform: scale(1.06); background: var(--accent-dark); }
+  .chat-bubble-btn.hidden { display: none; }
+ 
+  .chat-panel {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    justify-content: center;
+    z-index: 26;
+  }
+  .chat-panel.open { display: flex; }
+  .chat-panel-inner {
+    width: 100%;
+    max-width: 440px;
+    background: var(--card);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -6px 24px rgba(34,28,53,0.15);
+    animation: slideUp 0.2s ease-out;
+    display: flex;
+    flex-direction: column;
+    max-height: 70vh;
+  }
+  .chat-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .chat-panel-header span {
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .chat-panel-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+  }
+  .chat-panel-close:hover { color: var(--ink); }
+  .chat-log {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    padding: 14px 16px;
+    flex: 1;
+    min-height: 120px;
+  }
+  .chat-bubble {
+    max-width: 85%;
+    padding: 10px 13px;
+    border-radius: 12px;
+    font-size: 13.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+  .chat-bubble.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .chat-bubble.agent {
+    align-self: flex-start;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .chat-bubble.loading {
+    align-self: flex-start;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-style: italic;
+  }
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--card);
+    border-top: 1px solid var(--border);
+  }
+  .chat-input-row input {
+    flex: 1;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14.5px;
+    font-family: inherit;
+  }
+  .chat-input-row input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .chat-send-btn {
+    padding: 0 16px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .chat-send-btn:hover { background: var(--accent-dark); }
+  .chat-hint {
+    font-size: 11.5px;
+    color: var(--muted);
+    text-align: center;
+    padding: 8px 16px 0;
+    background: var(--card);
+  }
+</style>
+</head>
+<body>
+ 
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <h1>Student Wallet</h1>
+    <p class="sub">Enter your email and name to get started (or return to your existing data).</p>
+    <div class="field">
+      <label for="authEmail">Email</label>
+      <input type="email" id="authEmail" placeholder="you@example.com">
+    </div>
+    <div class="field">
+      <label for="authName">Preferred name</label>
+      <input type="text" id="authName" placeholder="What should I call you?">
+    </div>
+    <button class="btn btn-primary" style="width:100%;" onclick="submitAuth()">Continue</button>
+    <p class="status-msg" id="authStatus"></p>
+    <p class="auth-note">No password needed for now. Just remember the email you use so your data comes back next time.</p>
+  </div>
+</div>
+ 
+<div class="app">
+  <header>
+    <div>
+      <p class="greet" id="greetText">Welcome</p>
+      <h1>Student Wallet</h1>
+    </div>
+    <button class="edit-btn" onclick="openModal('editSemesterModal')" aria-label="Edit semester">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      </svg>
+    </button>
+  </header>
+ 
+  <div class="balance-card">
+    <p class="label">You have</p>
+    <p class="amount" id="balanceAmount">UGX —</p>
+    <p class="sub">left to spend</p>
+  </div>
+ 
+  <div class="stat-row">
+    <div class="stat-card" onclick="openModal('addIncomeModal')">
+      <p class="stat-label">Money in <span class="plus-badge">+</span></p>
+      <p class="stat-amount" id="moneyInAmount">UGX —</p>
+    </div>
+    <div class="stat-card" onclick="openModal('logExpenseModal')">
+      <p class="stat-label">Money out <span class="plus-badge">+</span></p>
+      <p class="stat-amount" id="moneyOutAmount">UGX —</p>
+    </div>
+  </div>
+ 
+  <div class="card">
+    <h2 id="weekLabel">Week — of —</h2>
+    <p class="sub" id="weeksRemaining">— weeks remaining</p>
+    <div class="progress-track">
+      <div class="progress-fill" style="width: 0%;" id="weekProgressFill"></div>
+    </div>
+    <p class="line">To stay steady, spend about <strong id="weeklyTarget">UGX —</strong> / week</p>
+  </div>
+ 
+  <div class="card insight-card">
+    <h2>Heads up</h2>
+    <p id="insightLine1">Loading this week's spending...</p>
+    <p id="insightLine2"></p>
+  </div>
+ 
+</div>
+ 
+<!-- Add Income Modal -->
+<div class="overlay" id="addIncomeModal">
+  <div class="modal">
+    <h3>Add income</h3>
+    <div class="field">
+      <label for="incomeAmount">Amount</label>
+      <input type="number" id="incomeAmount" placeholder="e.g. 100000">
+    </div>
+    <div class="field">
+      <label for="incomeSource">Source (optional)</label>
+      <input type="text" id="incomeSource" placeholder="e.g. Mom, scholarship">
+    </div>
+    <div class="field">
+      <label for="incomeMode">How should this be allocated?</label>
+      <select id="incomeMode">
+        <option value="auto_split">Split automatically by category</option>
+        <option value="targeted">This is for a specific category</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('addIncomeModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitIncome()">Add income</button>
+    </div>
+    <p class="status-msg" id="incomeStatus"></p>
+  </div>
+</div>
+ 
+<!-- Log Expense Modal -->
+<div class="overlay" id="logExpenseModal">
+  <div class="modal">
+    <h3>Log expense</h3>
+    <div class="field">
+      <label for="expenseAmount">Amount</label>
+      <input type="number" id="expenseAmount" placeholder="e.g. 6000">
+    </div>
+    <div class="field">
+      <label for="expenseCategory">Category</label>
+      <select id="expenseCategory">
+        <option value="Living">Living</option>
+        <option value="Fun">Fun</option>
+        <option value="Fixed">Fixed</option>
+        <option value="Miscellaneous">Miscellaneous</option>
+        <option value="Emergency">Emergency</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="expenseNote">Note (optional)</label>
+      <input type="text" id="expenseNote" placeholder="e.g. transport, groceries">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('logExpenseModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitExpense()">Log expense</button>
+    </div>
+    <p class="status-msg" id="expenseStatus"></p>
+  </div>
+</div>
+ 
+<!-- Edit Semester Modal -->
+<div class="overlay" id="editSemesterModal">
+  <div class="modal">
+    <h3>Edit semester</h3>
+    <div class="field">
+      <label for="semName">Semester name</label>
+      <input type="text" id="semName" placeholder="e.g. Year 3 Sem 1">
+    </div>
+    <div class="field">
+      <label for="semStart">Start date</label>
+      <input type="date" id="semStart">
+    </div>
+    <div class="field">
+      <label for="semEnd">End date</label>
+      <input type="date" id="semEnd">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('editSemesterModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitEditSemester()">Save changes</button>
+    </div>
+    <p class="status-msg" id="editStatus"></p>
+  </div>
+</div>
+ 
+<!-- Floating chat bubble + expandable panel -->
+<button class="chat-bubble-btn" id="chatBubbleBtn" onclick="toggleChatPanel(true)" aria-label="Chat with your agent">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+  </svg>
+</button>
+ 
+<div class="chat-panel" id="chatPanel">
+  <div class="chat-panel-inner">
+    <div class="chat-panel-header">
+      <span>Ask Student Wallet</span>
+      <button class="chat-panel-close" onclick="toggleChatPanel(false)" aria-label="Close chat">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="chat-log" id="chatLog"></div>
+    <p class="chat-hint" id="chatHint">Not sure what to enter? Just tell me in plain words below.</p>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" placeholder="e.g. I spent 4000 on food at the cafeteria">
+      <button class="chat-send-btn" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+</div>
+ 
+<script>
+  const API_BASE = "http://127.0.0.1:8000";
+  let currentSemesterId = null;
+  let currentUserName = "";
+ 
+  function getGreeting() {
+    const hour = new Date().getHours();
+    if (hour >= 3 && hour < 6) return "Yo it's the early worm";
+    if (hour >= 6 && hour < 11) return "Good morning";
+    if (hour >= 11 && hour < 17) return "Good afternoon";
+    if (hour >= 17 && hour < 22) return "Good evening";
+    return "Hey night owl";
+  }
+ 
+  function updateGreeting(name) {
+    document.getElementById('greetText').textContent = `${getGreeting()}, ${name}`;
+  }
+ 
+  async function submitAuth() {
+    const email = document.getElementById('authEmail').value.trim();
+    const name = document.getElementById('authName').value.trim();
+    const statusEl = document.getElementById('authStatus');
+ 
+    if (!email || !name) {
+      statusEl.textContent = "Please fill in both fields.";
+      statusEl.className = "status-msg error";
+      return;
+    }
+ 
+    statusEl.textContent = "Loading...";
+    statusEl.className = "status-msg";
+ 
+    try {
+      const res = await fetch(`${API_BASE}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, preferred_name: name }),
+      });
+      const data = await res.json();
+ 
+      localStorage.setItem('studentWalletEmail', email);
+      localStorage.setItem('studentWalletName', data.preferred_name);
+      currentUserName = data.preferred_name;
+      updateGreeting(currentUserName);
+ 
+      document.getElementById('authScreen').classList.add('hidden');
+ 
+      if (data.existing_semester_id) {
+        currentSemesterId = data.existing_semester_id;
+        loadDashboard();
+      } else {
+        document.getElementById('insightLine1').textContent =
+          "You don't have a semester set up yet - tap the chat bubble to get started!";
+      }
+    } catch (e) {
+      statusEl.textContent = "Couldn't reach the server. Is the backend running?";
+      statusEl.className = "status-msg error";
+    }
+  }
+ 
+  function checkExistingLogin() {
+    const savedEmail = localStorage.getItem('studentWalletEmail');
+    const savedName = localStorage.getItem('studentWalletName');
+    if (savedEmail && savedName) {
+      document.getElementById('authEmail').value = savedEmail;
+      document.getElementById('authName').value = savedName;
+      submitAuth();
+    }
+  }
+ 
+  function openModal(id) { document.getElementById(id).classList.add('open'); }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('open');
+    const status = document.getElementById(id).querySelector('.status-msg');
+    if (status) { status.textContent = ''; status.className = 'status-msg'; }
+  }
+ 
+  async function sendToAgent(message) {
+    const res = await fetch(`${API_BASE}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    if (!res.ok) throw new Error("Request failed");
+    return res.json();
+  }
+ 
+  function fmt(n) {
+    if (n === undefined || n === null) return "—";
+    return "UGX " + Number(n).toLocaleString();
+  }
+ 
+  async function loadDashboard() {
+    if (!currentSemesterId) return;
+    try {
+      const res = await fetch(`${API_BASE}/dashboard/${currentSemesterId}`);
+      if (!res.ok) throw new Error("not found");
+      const d = await res.json();
+ 
+      document.getElementById('balanceAmount').textContent = fmt(d.balance);
+      document.getElementById('moneyInAmount').textContent = fmt(d.money_in);
+      document.getElementById('moneyOutAmount').textContent = fmt(d.money_out);
+      document.getElementById('weekLabel').textContent = `Week ${d.current_week} of ${d.total_weeks}`;
+      document.getElementById('weeksRemaining').textContent = `${d.weeks_remaining} weeks remaining`;
+      document.getElementById('weekProgressFill').style.width = `${Math.round((d.current_week/d.total_weeks)*100)}%`;
+      document.getElementById('weeklyTarget').textContent = fmt(d.weekly_target);
+ 
+      const line1 = document.getElementById('insightLine1');
+      const line2 = document.getElementById('insightLine2');
+      if (d.is_over_budget) {
+        line1.innerHTML = `This week you've spent <strong>${fmt(d.this_week_spent)}</strong> — that's <span class="over">${fmt(d.over_under_amount)} over budget</span>.`;
+      } else {
+        line1.innerHTML = `This week you've spent <strong>${fmt(d.this_week_spent)}</strong> — <span class="under">${fmt(d.over_under_amount)} under budget</span>.`;
+      }
+      line2.innerHTML = `${d.trend === 'down' ? '↘' : '↗'} Spending is <strong>${d.trend} from last week</strong> (${fmt(d.last_week_spent)})`;
+    } catch (e) {
+      console.error("Dashboard failed to load:", e);
+    }
+  }
+ 
+  async function submitIncome() {
+    const amount = document.getElementById('incomeAmount').value;
+    const source = document.getElementById('incomeSource').value;
+    const mode = document.getElementById('incomeMode').value;
+    const statusEl = document.getElementById('incomeStatus');
+    if (!amount) { statusEl.textContent = "Please enter an amount."; statusEl.className = "status-msg error"; return; }
+ 
+    let message = `I received ${amount}`;
+    if (source) message += ` from ${source}`;
+    message += mode === 'auto_split' ? ", split it automatically." : ", it's for a specific category.";
+ 
+    statusEl.textContent = "Sending..."; statusEl.className = "status-msg";
+    try {
+      const data = await sendToAgent(message);
+      statusEl.textContent = data.reply; statusEl.className = "status-msg success";
+      loadDashboard();
+    } catch (e) {
+      statusEl.textContent = "Couldn't reach the agent. Is the backend running?"; statusEl.className = "status-msg error";
+    }
+  }
+ 
+  async function submitExpense() {
+    const amount = document.getElementById('expenseAmount').value;
+    const category = document.getElementById('expenseCategory').value;
+    const note = document.getElementById('expenseNote').value;
+    const statusEl = document.getElementById('expenseStatus');
+    if (!amount) { statusEl.textContent = "Please enter an amount."; statusEl.className = "status-msg error"; return; }
+ 
+    let message = `I spent ${amount} on ${category}`;
+    if (note) message += ` for ${note}`;
+ 
+    statusEl.textContent = "Sending..."; statusEl.className = "status-msg";
+    try {
+      const data = await sendToAgent(message);
+      statusEl.textContent = data.reply; statusEl.className = "status-msg success";
+      loadDashboard();
+    } catch (e) {
+      statusEl.textContent = "Couldn't reach the agent. Is the backend running?"; statusEl.className = "status-msg error";
+    }
+  }
+ 
+  async function submitEditSemester() {
+    const name = document.getElementById('semName').value;
+    const start = document.getElementById('semStart').value;
+    const end = document.getElementById('semEnd').value;
+    const statusEl = document.getElementById('editStatus');
+    if (!name && !start && !end) { statusEl.textContent = "Change at least one field."; statusEl.className = "status-msg error"; return; }
+ 
+    let message = "Update my semester:";
+    if (name) message += ` name to ${name},`;
+    if (start) message += ` start date to ${start},`;
+    if (end) message += ` end date to ${end},`;
+ 
+    statusEl.textContent = "Sending..."; statusEl.className = "status-msg";
+    try {
+      const data = await sendToAgent(message);
+      statusEl.textContent = data.reply; statusEl.className = "status-msg success";
+      loadDashboard();
+    } catch (e) {
+      statusEl.textContent = "Couldn't reach the agent. Is the backend running?"; statusEl.className = "status-msg error";
+    }
+  }
+ 
+  function toggleChatPanel(open) {
+    const panel = document.getElementById('chatPanel');
+    const btn = document.getElementById('chatBubbleBtn');
+    if (open) {
+      panel.classList.add('open');
+      btn.classList.add('hidden');
+      document.getElementById('chatInput').focus();
+    } else {
+      panel.classList.remove('open');
+      btn.classList.remove('hidden');
+    }
+  }
+ 
+  function addChatBubble(text, sender) {
+    const log = document.getElementById('chatLog');
+    const div = document.createElement('div');
+    div.className = 'chat-bubble ' + sender;
+    div.textContent = text;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+ 
+  async function sendChat() {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    addChatBubble(text, 'user');
+    input.value = '';
+    const loadingBubble = addChatBubble('Thinking...', 'loading');
+    try {
+      const data = await sendToAgent(text);
+      loadingBubble.remove();
+      addChatBubble(data.reply, 'agent');
+      loadDashboard();
+    } catch (e) {
+      loadingBubble.remove();
+      addChatBubble("Couldn't reach the agent. Is the backend running?", 'agent');
+    }
+  }
+ 
+  document.getElementById('chatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendChat();
+  });
+ 
+  // Check for a saved login on page open
+  checkExistingLogin();
+</script>
+ 
+</body>
+</html>

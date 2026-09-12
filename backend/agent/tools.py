@@ -1,17 +1,23 @@
-from datetime import date
+import json
+from datetime import date, datetime, timedelta
 
 from strands import tool
-
+from backend.state import get_current_user
 from backend.database import SessionLocal
 from backend.models import (
     AgentDecision,
     AllocationMode,
     Category,
+    CategoryType,
     FixedCost,
     IncomeAllocation,
     IncomeEntry,
     IncomePattern,
+    ReallocationMode,
+    ReallocationTransfer,
+    RolloverChoice,
     Semester,
+    Subcategory,
     Transaction,
 )
 
@@ -69,7 +75,18 @@ def _category_allocated_income(session, category_id: int) -> float:
     allocations = (
         session.query(IncomeAllocation).filter_by(category_id=category_id).all()
     )
-    return sum(a.amount for a in allocations)
+    base = sum(a.amount for a in allocations)
+
+    incoming = (
+        session.query(ReallocationTransfer).filter_by(to_category_id=category_id).all()
+    )
+    outgoing = (
+        session.query(ReallocationTransfer).filter_by(from_category_id=category_id).all()
+    )
+    transferred_in = sum(t.amount for t in incoming)
+    transferred_out = sum(t.amount for t in outgoing)
+
+    return base + transferred_in - transferred_out
 
 
 def _category_spent(session, category_id: int) -> float:
@@ -403,7 +420,7 @@ def check_fixed_cost_reminders(semester_id: int) -> dict:
             days_until_due = (cost.due_date - today).days
 
             if days_until_due < 0:
-                continue  # overdue and unpaid — handled separately, not a reminder case
+                continue
 
             if days_until_due == 7 and not cost.reminded_week_before:
                 cost.reminded_week_before = True
@@ -449,6 +466,491 @@ def check_fixed_cost_reminders(semester_id: int) -> dict:
             "success": True,
             "reminders_fired": reminders_fired,
             "count": len(reminders_fired),
+        }
+    finally:
+        session.close()
+
+
+#Execute Reallocation
+@tool
+def execute_reallocation(decision_id: int, approved: bool) -> dict:
+    session = SessionLocal()
+    try:
+        decision = session.get(AgentDecision, decision_id)
+        if decision is None:
+            return {"success": False, "error": "Decision not found."}
+
+        if decision.kind != "reallocation_suggestion":
+            return {"success": False, "error": "This decision is not a reallocation suggestion."}
+
+        if decision.resolved:
+            return {"success": False, "error": "This decision has already been resolved."}
+
+        if not approved:
+            decision.resolved = True
+            decision.resolution = "declined"
+            decision.resolved_at = datetime.utcnow()
+            session.commit()
+            return {"success": True, "executed": False, "message": "Reallocation declined."}
+
+        semester = session.get(Semester, decision.semester_id)
+        payload = json.loads(decision.payload)
+        from_category_id = payload["from_category_id"]
+        to_category_id = payload["to_category_id"]
+        amount = payload["amount"]
+
+        if semester.reallocation_mode == ReallocationMode.MANUAL:
+            decision.resolved = True
+            decision.resolution = "approved_manual"
+            decision.resolved_at = datetime.utcnow()
+            session.commit()
+            return {
+                "success": True,
+                "executed": False,
+                "message": (
+                    f"Approved. Since reallocation mode is manual, please move "
+                    f"{amount:.0f} from category {from_category_id} to "
+                    f"category {to_category_id} yourself."
+                ),
+            }
+
+        transfer = ReallocationTransfer(
+            semester_id=semester.id,
+            from_category_id=from_category_id,
+            to_category_id=to_category_id,
+            amount=amount,
+            decision_id=decision.id,
+        )
+        session.add(transfer)
+
+        decision.resolved = True
+        decision.resolution = "approved_executed"
+        decision.resolved_at = datetime.utcnow()
+        session.commit()
+
+        return {
+            "success": True,
+            "executed": True,
+            "message": f"Moved {amount:.0f} from category {from_category_id} to category {to_category_id}.",
+        }
+    finally:
+        session.close()
+
+#Digest Generation
+@tool
+def generate_digest(semester_id: int, period: str = "weekly") -> dict:
+    session = SessionLocal()
+    try:
+        semester = session.get(Semester, semester_id)
+        if semester is None:
+            return {"success": False, "error": "Semester not found."}
+
+        today = date.today()
+
+        if period == "weekly":
+            window_start = today - timedelta(days=7)
+        elif period == "monthly":
+            window_start = today - timedelta(days=30)
+        elif period == "semester":
+            window_start = semester.start_date
+        else:
+            return {"success": False, "error": "period must be 'weekly', 'monthly', or 'semester'."}
+
+        categories = session.query(Category).filter_by(semester_id=semester_id).all()
+
+        category_summaries = []
+        total_spent_period = 0.0
+        for cat in categories:
+            all_txns = session.query(Transaction).filter_by(category_id=cat.id).all()
+            period_txns = [t for t in all_txns if t.timestamp.date() >= window_start]
+            period_spent = sum(t.amount for t in period_txns)
+            total_spent_period += period_spent
+
+            pacing = check_pacing(category_id=cat.id)
+
+            category_summaries.append({
+                "category": cat.name,
+                "spent_this_period": period_spent,
+                "total_spent": pacing.get("spent", 0),
+                "allocated": pacing.get("allocated", 0),
+                "status": pacing.get("status", "no_data"),
+            })
+
+        income_entries = session.query(IncomeEntry).filter_by(semester_id=semester_id).all()
+        period_income = [i for i in income_entries if i.timestamp.date() >= window_start]
+        total_income_period = sum(i.amount for i in period_income)
+        total_income_all_time = sum(i.amount for i in income_entries)
+
+        decisions = (
+            session.query(AgentDecision)
+            .filter_by(semester_id=semester_id)
+            .all()
+        )
+        period_decisions = [d for d in decisions if d.created_at.date() >= window_start]
+        decisions_by_kind = {}
+        for d in period_decisions:
+            decisions_by_kind[d.kind] = decisions_by_kind.get(d.kind, 0) + 1
+
+        resolved_count = sum(1 for d in period_decisions if d.resolved)
+        pending_count = sum(1 for d in period_decisions if not d.resolved)
+
+        emergency_uses = [d for d in period_decisions if d.kind == "emergency_flag"]
+
+        summary = {
+            "success": True,
+            "period": period,
+            "window_start": window_start.isoformat(),
+            "window_end": today.isoformat(),
+            "income_this_period": total_income_period,
+            "income_all_time": total_income_all_time,
+            "spent_this_period": total_spent_period,
+            "categories": category_summaries,
+            "decisions_surfaced": len(period_decisions),
+            "decisions_by_kind": decisions_by_kind,
+            "decisions_resolved": resolved_count,
+            "decisions_pending": pending_count,
+            "emergency_uses_this_period": len(emergency_uses),
+        }
+
+        if period == "semester":
+            summary["semester_name"] = semester.name
+            summary["semester_start"] = semester.start_date.isoformat()
+            summary["semester_end"] = semester.end_date.isoformat()
+            summary["rollover_choice"] = semester.rollover_choice.value
+
+        return summary
+    finally:
+        session.close()
+
+#Semester Rollover
+@tool
+def resolve_semester_rollover(semester_id: int, choice: str | None = None) -> dict:
+    session = SessionLocal()
+    try:
+        semester = session.get(Semester, semester_id)
+        if semester is None:
+            return {"success": False, "error": "Semester not found."}
+
+        if semester.rollover_choice != RolloverChoice.UNDECIDED:
+            return {
+                "success": False,
+                "error": "already_resolved",
+                "message": f"Rollover was already resolved as '{semester.rollover_choice.value}'.",
+            }
+
+        if choice is None:
+            semester.rollover_choice = RolloverChoice.RESET
+            semester.carried_over_amount = 0.0
+            session.commit()
+            return {
+                "success": True,
+                "choice_made": "reset",
+                "defaulted": True,
+                "message": "No response received, so defaulted to reset. Leftover funds will not carry over.",
+            }
+
+        if choice not in ("reset", "carryover"):
+            return {"success": False, "error": "choice must be 'reset', 'carryover', or omitted."}
+
+        if choice == "reset":
+            semester.rollover_choice = RolloverChoice.RESET
+            semester.carried_over_amount = 0.0
+            session.commit()
+            return {
+                "success": True,
+                "choice_made": "reset",
+                "defaulted": False,
+                "message": "Semester will reset fresh. No funds carried over.",
+            }
+
+        categories = session.query(Category).filter_by(semester_id=semester_id).all()
+        total_leftover = 0.0
+        for cat in categories:
+            if cat.type == CategoryType.EMERGENCY:
+                continue
+            pacing = check_pacing(category_id=cat.id)
+            allocated = pacing.get("allocated", 0)
+            spent = pacing.get("spent", 0)
+            leftover = allocated - spent
+            if leftover > 0:
+                total_leftover += leftover
+
+        semester.rollover_choice = RolloverChoice.CARRYOVER
+        semester.carried_over_amount = round(total_leftover, 2)
+        session.commit()
+
+        return {
+            "success": True,
+            "choice_made": "carryover",
+            "defaulted": False,
+            "carried_over_amount": round(total_leftover, 2),
+            "message": f"{total_leftover:.0f} in leftover funds will carry over to the next semester.",
+        }
+    finally:
+        session.close()
+
+
+@tool
+def start_new_semester(
+    previous_semester_id: int,
+    name: str,
+    start_date_str: str,
+    end_date_str: str,
+    income_pattern: str,
+) -> dict:
+    session = SessionLocal()
+    try:
+        previous = session.get(Semester, previous_semester_id)
+        if previous is None:
+            return {"success": False, "error": "Previous semester not found."}
+
+        if previous.rollover_choice == RolloverChoice.UNDECIDED:
+            return {
+                "success": False,
+                "error": "rollover_undecided",
+                "message": (
+                    "The previous semester's rollover choice hasn't been resolved yet. "
+                    "Call resolve_semester_rollover first."
+                ),
+            }
+
+        try:
+            pattern = IncomePattern(income_pattern)
+        except ValueError:
+            return {"success": False, "error": "Invalid income_pattern."}
+
+        try:
+            new_start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            new_end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return {"success": False, "error": "Dates must be in YYYY-MM-DD format."}
+
+        previous.is_active = False
+
+        new_semester = Semester(
+            name=name,
+            start_date=new_start,
+            end_date=new_end,
+            income_pattern=pattern,
+            carried_over_amount=previous.carried_over_amount,
+        )
+        session.add(new_semester)
+        session.commit()
+
+        return {
+            "success": True,
+            "new_semester_id": new_semester.id,
+            "carried_over_amount": new_semester.carried_over_amount,
+            "message": f"New semester '{name}' created, starting with {new_semester.carried_over_amount:.0f} carried over.",
+        }
+    finally:
+        session.close()
+
+#Semester Setup
+@tool
+def setup_semester(
+    name: str,
+    start_date_str: str,
+    end_date_str: str,
+    income_pattern: str,
+    reallocation_mode: str = "manual",
+    fixed_percentage: float = 0.0,
+    living_percentage: float = 0.0,
+    fun_percentage: float = 0.0,
+    miscellaneous_percentage: float = 0.0,
+    emergency_percentage: float = 0.0,
+) -> dict:    #Creates new semester with the standard category structure
+    session = SessionLocal()
+    try:
+        try:
+            pattern = IncomePattern(income_pattern)
+        except ValueError:
+            return {"success": False, "error": f"Invalid income_pattern: {income_pattern}"}
+
+        try:
+            realloc_mode = ReallocationMode(reallocation_mode)
+        except ValueError:
+            return {"success": False, "error": f"Invalid reallocation_mode: {reallocation_mode}"}
+
+        try:
+            start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return {"success": False, "error": "Dates must be in YYYY-MM-DD format."}
+        
+        user_id = get_current_user()
+        if user_id is None:
+            return {
+                "success": False,
+                "error": "no_active_user",
+                "message": "No user is currently registered. Please register first.",
+            }
+        semester = Semester(
+            user_id=user_id,
+            name=name,
+            start_date=start,
+            end_date=end,
+            income_pattern=pattern,
+            reallocation_mode=realloc_mode,
+        )
+        session.add(semester)
+        session.commit()
+
+        category_plan = [
+            ("Fixed", CategoryType.FIXED, fixed_percentage, False,
+             ["Tuition", "Rent", "Internet"]),
+            ("Living", CategoryType.LIVING, living_percentage, False,
+             ["Food", "Transport"]),
+            ("Fun", CategoryType.FUN, fun_percentage, False,
+             ["Shopping"]),
+            ("Miscellaneous", CategoryType.MISCELLANEOUS, miscellaneous_percentage, False,
+             ["Contributions"]),
+            ("Emergency", CategoryType.EMERGENCY, emergency_percentage, True,
+             []),
+        ]
+
+        created_categories = []
+        for cat_name, cat_type, percentage, requires_reason, subcats in category_plan:
+            category = Category(
+                semester_id=semester.id,
+                name=cat_name,
+                type=cat_type,
+                target_percentage=percentage,
+                requires_reason=requires_reason,
+            )
+            session.add(category)
+            session.commit()
+
+            for sub_name in subcats:
+                subcategory = Subcategory(
+                    category_id=category.id,
+                    name=sub_name,
+                    is_custom=False,
+                )
+                session.add(subcategory)
+
+            created_categories.append({
+                "category_id": category.id,
+                "name": cat_name,
+                "percentage": percentage,
+                "subcategories": subcats,
+            })
+
+        session.commit()
+
+        return {
+            "success": True,
+            "semester_id": semester.id,
+            "name": name,
+            "categories": created_categories,
+        }
+    finally:
+        session.close()
+
+
+@tool
+def add_custom_subcategory(category_id: int, subcategory_name: str) -> dict:
+    #Lets the user add their own custom subcategory under an existing category.
+    session = SessionLocal()
+    try:
+        category = session.get(Category, category_id)
+        if category is None:
+            return {"success": False, "error": "Category not found."}
+
+        existing = (
+            session.query(Subcategory)
+            .filter_by(category_id=category_id, name=subcategory_name)
+            .first()
+        )
+        if existing:
+            return {"success": False, "error": "A subcategory with that name already exists here."}
+
+        subcategory = Subcategory(
+            category_id=category_id,
+            name=subcategory_name,
+            is_custom=True,
+        )
+        session.add(subcategory)
+        session.commit()
+
+        return {
+            "success": True,
+            "subcategory_id": subcategory.id,
+            "name": subcategory_name,
+            "category": category.name,
+        }
+    finally:
+        session.close()
+
+#Edit Semester
+@tool
+def edit_semester(
+    semester_id: int,
+    name: str | None = None,
+    start_date_str: str | None = None,
+    end_date_str: str | None = None,
+    income_pattern: str | None = None,
+    reallocation_mode: str | None = None,
+) -> dict:
+    """
+    Updates an existing semester's details. Only the fields provided
+    are changed - omit anything the user doesn't want to update.
+    """
+    session = SessionLocal()
+    try:
+        semester = session.get(Semester, semester_id)
+        if semester is None:
+            return {"success": False, "error": "Semester not found."}
+
+        changes = {}
+
+        if name is not None:
+            semester.name = name
+            changes["name"] = name
+
+        if start_date_str is not None:
+            try:
+                new_start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return {"success": False, "error": "start_date_str must be in YYYY-MM-DD format."}
+            semester.start_date = new_start
+            changes["start_date"] = start_date_str
+
+        if end_date_str is not None:
+            try:
+                new_end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return {"success": False, "error": "end_date_str must be in YYYY-MM-DD format."}
+            semester.end_date = new_end
+            changes["end_date"] = end_date_str
+
+        if semester.start_date >= semester.end_date:
+            session.rollback()
+            return {"success": False, "error": "Start date must be before end date."}
+
+        if income_pattern is not None:
+            try:
+                semester.income_pattern = IncomePattern(income_pattern)
+            except ValueError:
+                return {"success": False, "error": f"Invalid income_pattern: {income_pattern}"}
+            changes["income_pattern"] = income_pattern
+
+        if reallocation_mode is not None:
+            try:
+                semester.reallocation_mode = ReallocationMode(reallocation_mode)
+            except ValueError:
+                return {"success": False, "error": f"Invalid reallocation_mode: {reallocation_mode}"}
+            changes["reallocation_mode"] = reallocation_mode
+
+        if not changes:
+            return {"success": False, "error": "No fields provided to update."}
+
+        session.commit()
+
+        return {
+            "success": True,
+            "semester_id": semester.id,
+            "changes_made": changes,
         }
     finally:
         session.close()

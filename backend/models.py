@@ -33,6 +33,7 @@ class Semester(Base):
     __tablename__ = "semesters"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String, nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -189,3 +190,24 @@ class AgentDecision(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+#Record of funds transfer
+class ReallocationTransfer(Base):
+    __tablename__ = "reallocation_transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    semester_id: Mapped[int] = mapped_column(ForeignKey("semesters.id"))
+    from_category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    to_category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    decision_id: Mapped[int] = mapped_column(ForeignKey("agent_decisions.id"))
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class User(Base):   #Students' aaccount
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    preferred_name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
