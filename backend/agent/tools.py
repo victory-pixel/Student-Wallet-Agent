@@ -2,7 +2,7 @@ import json
 from datetime import date, datetime, timedelta
 
 from strands import tool
-
+from backend.state import get_current_user
 from backend.database import SessionLocal
 from backend.models import (
     AgentDecision,
@@ -777,8 +777,16 @@ def setup_semester(
             end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
         except ValueError:
             return {"success": False, "error": "Dates must be in YYYY-MM-DD format."}
-
+        
+        user_id = get_current_user()
+        if user_id is None:
+            return {
+                "success": False,
+                "error": "no_active_user",
+                "message": "No user is currently registered. Please register first.",
+            }
         semester = Semester(
+            user_id=user_id,
             name=name,
             start_date=start,
             end_date=end,
