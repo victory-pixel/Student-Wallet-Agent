@@ -728,6 +728,7 @@ def start_new_semester(
         previous.is_active = False
 
         new_semester = Semester(
+            user_id=previous.user_id,
             name=name,
             start_date=new_start,
             end_date=new_end,
