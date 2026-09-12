@@ -17,6 +17,7 @@ from backend.models import (
     ReallocationTransfer,
     RolloverChoice,
     Semester,
+    Subcategory,
     Transaction,
 )
 
@@ -741,6 +742,207 @@ def start_new_semester(
             "new_semester_id": new_semester.id,
             "carried_over_amount": new_semester.carried_over_amount,
             "message": f"New semester '{name}' created, starting with {new_semester.carried_over_amount:.0f} carried over.",
+        }
+    finally:
+        session.close()
+
+#Semester Setup
+@tool
+def setup_semester(
+    name: str,
+    start_date_str: str,
+    end_date_str: str,
+    income_pattern: str,
+    reallocation_mode: str = "manual",
+    fixed_percentage: float = 0.0,
+    living_percentage: float = 0.0,
+    fun_percentage: float = 0.0,
+    miscellaneous_percentage: float = 0.0,
+    emergency_percentage: float = 0.0,
+) -> dict:    #Creates new semester with the standard category structure
+    session = SessionLocal()
+    try:
+        try:
+            pattern = IncomePattern(income_pattern)
+        except ValueError:
+            return {"success": False, "error": f"Invalid income_pattern: {income_pattern}"}
+
+        try:
+            realloc_mode = ReallocationMode(reallocation_mode)
+        except ValueError:
+            return {"success": False, "error": f"Invalid reallocation_mode: {reallocation_mode}"}
+
+        try:
+            start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return {"success": False, "error": "Dates must be in YYYY-MM-DD format."}
+
+        semester = Semester(
+            name=name,
+            start_date=start,
+            end_date=end,
+            income_pattern=pattern,
+            reallocation_mode=realloc_mode,
+        )
+        session.add(semester)
+        session.commit()
+
+        category_plan = [
+            ("Fixed", CategoryType.FIXED, fixed_percentage, False,
+             ["Tuition", "Rent", "Internet"]),
+            ("Living", CategoryType.LIVING, living_percentage, False,
+             ["Food", "Transport"]),
+            ("Fun", CategoryType.FUN, fun_percentage, False,
+             ["Shopping"]),
+            ("Miscellaneous", CategoryType.MISCELLANEOUS, miscellaneous_percentage, False,
+             ["Contributions"]),
+            ("Emergency", CategoryType.EMERGENCY, emergency_percentage, True,
+             []),
+        ]
+
+        created_categories = []
+        for cat_name, cat_type, percentage, requires_reason, subcats in category_plan:
+            category = Category(
+                semester_id=semester.id,
+                name=cat_name,
+                type=cat_type,
+                target_percentage=percentage,
+                requires_reason=requires_reason,
+            )
+            session.add(category)
+            session.commit()
+
+            for sub_name in subcats:
+                subcategory = Subcategory(
+                    category_id=category.id,
+                    name=sub_name,
+                    is_custom=False,
+                )
+                session.add(subcategory)
+
+            created_categories.append({
+                "category_id": category.id,
+                "name": cat_name,
+                "percentage": percentage,
+                "subcategories": subcats,
+            })
+
+        session.commit()
+
+        return {
+            "success": True,
+            "semester_id": semester.id,
+            "name": name,
+            "categories": created_categories,
+        }
+    finally:
+        session.close()
+
+
+@tool
+def add_custom_subcategory(category_id: int, subcategory_name: str) -> dict:
+    #Lets the user add their own custom subcategory under an existing category.
+    session = SessionLocal()
+    try:
+        category = session.get(Category, category_id)
+        if category is None:
+            return {"success": False, "error": "Category not found."}
+
+        existing = (
+            session.query(Subcategory)
+            .filter_by(category_id=category_id, name=subcategory_name)
+            .first()
+        )
+        if existing:
+            return {"success": False, "error": "A subcategory with that name already exists here."}
+
+        subcategory = Subcategory(
+            category_id=category_id,
+            name=subcategory_name,
+            is_custom=True,
+        )
+        session.add(subcategory)
+        session.commit()
+
+        return {
+            "success": True,
+            "subcategory_id": subcategory.id,
+            "name": subcategory_name,
+            "category": category.name,
+        }
+    finally:
+        session.close()
+
+#Edit Semester
+@tool
+def edit_semester(
+    semester_id: int,
+    name: str | None = None,
+    start_date_str: str | None = None,
+    end_date_str: str | None = None,
+    income_pattern: str | None = None,
+    reallocation_mode: str | None = None,
+) -> dict:
+    """
+    Updates an existing semester's details. Only the fields provided
+    are changed - omit anything the user doesn't want to update.
+    """
+    session = SessionLocal()
+    try:
+        semester = session.get(Semester, semester_id)
+        if semester is None:
+            return {"success": False, "error": "Semester not found."}
+
+        changes = {}
+
+        if name is not None:
+            semester.name = name
+            changes["name"] = name
+
+        if start_date_str is not None:
+            try:
+                new_start = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return {"success": False, "error": "start_date_str must be in YYYY-MM-DD format."}
+            semester.start_date = new_start
+            changes["start_date"] = start_date_str
+
+        if end_date_str is not None:
+            try:
+                new_end = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return {"success": False, "error": "end_date_str must be in YYYY-MM-DD format."}
+            semester.end_date = new_end
+            changes["end_date"] = end_date_str
+
+        if semester.start_date >= semester.end_date:
+            session.rollback()
+            return {"success": False, "error": "Start date must be before end date."}
+
+        if income_pattern is not None:
+            try:
+                semester.income_pattern = IncomePattern(income_pattern)
+            except ValueError:
+                return {"success": False, "error": f"Invalid income_pattern: {income_pattern}"}
+            changes["income_pattern"] = income_pattern
+
+        if reallocation_mode is not None:
+            try:
+                semester.reallocation_mode = ReallocationMode(reallocation_mode)
+            except ValueError:
+                return {"success": False, "error": f"Invalid reallocation_mode: {reallocation_mode}"}
+            changes["reallocation_mode"] = reallocation_mode
+
+        if not changes:
+            return {"success": False, "error": "No fields provided to update."}
+
+        session.commit()
+
+        return {
+            "success": True,
+            "semester_id": semester.id,
+            "changes_made": changes,
         }
     finally:
         session.close()
